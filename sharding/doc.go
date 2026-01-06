@@ -23,6 +23,11 @@ is deterministically assigned to exactly one replica, enabling true horizontal s
 
 # How It Works
 
+The core is Consistent Hashing with Bounded Loads, based on the Google research paper:
+https://research.google/pubs/consistent-hashing-with-bounded-loads/
+
+Implementation powered by github.com/buraksezer/consistent.
+
   - Each operator pod maintains a Lease object as a heartbeat
   - Pods discover each other by watching Lease objects
   - A consistent hash ring determines which pod owns each resource
@@ -32,12 +37,16 @@ is deterministically assigned to exactly one replica, enabling true horizontal s
 
 In your main.go, after creating the manager:
 
-	import "github.com/your-org/operator-scaling/sharding"
+	import "github.com/tom-ludwig/operator-scaling/sharding"
 
 	func main() {
-	    // ... create manager ...
+	    // Create manager with leader election DISABLED
+	    mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	        LeaderElection: false, // Required - all replicas must be active
+	        // ...
+	    })
 
-	    // Setup sharding with defaults
+	    // Setup sharding
 	    shard, err := sharding.SetupWithDefaults(mgr)
 	    if err != nil {
 	        setupLog.Error(err, "unable to setup sharding")
@@ -78,33 +87,18 @@ Use DefaultConfig() and chain With* methods:
 
 	cfg := sharding.DefaultConfig().
 	    WithNamespace("my-operator").
-	    WithLeasePrefix("myop-shard-").
+	    WithLeasePrefix("myop-").
 	    WithHashRing(1009, 20, 1.25)
 
 	shard, err := sharding.Setup(mgr, cfg)
 
-# Key Functions
-
-For controllers, the main method is:
-
-	orchestrator.Owns(resourceName) bool
-
-This returns true if this pod should handle the resource.
-
-# Metrics
-
-The package exports Prometheus metrics:
-
-  - sharding_ring_member_count: Current members in the ring
-  - sharding_ring_members_added_total: Members added over time
-  - sharding_ring_members_removed_total: Members removed over time
-  - sharding_partitions_relocated_total: Partitions that changed ownership
-  - sharding_lease_heartbeats_total: Successful heartbeats
-  - sharding_lease_heartbeat_failures_total: Failed heartbeats (alert on this)
-
 # Requirements
 
-Your deployment needs these environment variables:
+Disable leader election (all replicas must be active):
+
+	LeaderElection: false
+
+Environment variables in your Deployment:
 
 	env:
 	- name: POD_NAME
@@ -116,10 +110,28 @@ Your deployment needs these environment variables:
 	    fieldRef:
 	      fieldPath: metadata.namespace
 
-And RBAC for Lease objects:
+RBAC (add these markers to auto-generate):
 
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+	// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
+	// +kubebuilder:rbac:groups="",resources=pods,verbs=get
+
+The pods/get permission sets owner references for automatic lease cleanup.
+If unavailable, leases still expire naturally (~30s).
+
+# Changing Hash Ring Parameters
+
+Hash ring parameters (PartitionCount, ReplicationFactor, Load) cannot be changed
+during a rolling update. Different replicas would have different configurations.
+
+To change these parameters: scale to 0, update config, scale back up.
+
+# Metrics
+
+  - sharding_ring_member_count: Current members in the ring
+  - sharding_ring_members_added_total: Members added over time
+  - sharding_ring_members_removed_total: Members removed over time
+  - sharding_partitions_relocated_total: Partitions that changed ownership
+  - sharding_lease_heartbeats_total: Successful heartbeats
+  - sharding_lease_heartbeat_failures_total: Failed heartbeats (alert on this)
 */
 package sharding

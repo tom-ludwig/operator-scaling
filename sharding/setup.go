@@ -59,7 +59,8 @@ func Setup(mgr ctrl.Manager, cfg Config) (*Sharding, error) {
 	orchestrator := newOrchestrator(cfg)
 
 	// Create and register the lease manager (heartbeat)
-	leaseManager := newLeaseManager(mgr.GetClient(), cfg)
+	// Pass apiReader for pod lookups to avoid cache-related RBAC issues
+	leaseManager := newLeaseManager(mgr.GetClient(), mgr.GetAPIReader(), cfg)
 	if err := mgr.Add(leaseManager); err != nil {
 		return nil, fmt.Errorf("unable to register lease manager: %w", err)
 	}

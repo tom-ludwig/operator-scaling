@@ -37,7 +37,6 @@ type LeaseWatcher struct {
 	config       Config
 }
 
-// newLeaseWatcher creates a new LeaseWatcher.
 func newLeaseWatcher(c client.Client, scheme *runtime.Scheme, orchestrator *ShardOrchestrator, cfg Config) *LeaseWatcher {
 	return &LeaseWatcher{
 		Client:       c,

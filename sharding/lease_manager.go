@@ -32,16 +32,19 @@ import (
 // LeaseManager manages the pod's lease heartbeat.
 // It creates and periodically renews a Lease object to signal liveness to other pods.
 type LeaseManager struct {
-	client   client.Client
-	config   Config
-	ownerRef *metav1.OwnerReference
+	client    client.Client
+	apiReader client.Reader // Direct API access (bypasses cache, avoids cluster-wide RBAC)
+	config    Config
+	ownerRef  *metav1.OwnerReference
 }
 
 // newLeaseManager creates a new LeaseManager.
-func newLeaseManager(c client.Client, cfg Config) *LeaseManager {
+// apiReader is used for pod lookups to avoid cache-related RBAC issues.
+func newLeaseManager(c client.Client, apiReader client.Reader, cfg Config) *LeaseManager {
 	return &LeaseManager{
-		client: c,
-		config: cfg,
+		client:    c,
+		apiReader: apiReader,
+		config:    cfg,
 	}
 }
 
@@ -64,13 +67,15 @@ func (l *LeaseManager) Start(ctx context.Context) error {
 
 // ensureOwnerRef retrieves the current Pod to set it as the Lease owner.
 // This ensures the lease is garbage collected when the pod is deleted.
+// Uses apiReader (direct API call) to avoid cache-related RBAC issues -
+// only requires "get" permission on pods in the operator's namespace.
 func (l *LeaseManager) ensureOwnerRef(ctx context.Context) error {
 	if l.ownerRef != nil || l.config.PodName == "" {
 		return nil
 	}
 
 	var pod corev1.Pod
-	if err := l.client.Get(ctx, types.NamespacedName{
+	if err := l.apiReader.Get(ctx, types.NamespacedName{
 		Namespace: l.config.Namespace,
 		Name:      l.config.PodName,
 	}, &pod); err != nil {
